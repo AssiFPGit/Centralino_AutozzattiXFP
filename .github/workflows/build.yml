@@ -1,0 +1,72 @@
+# Nome del workflow che vedrai nella tab "Actions" di GitHub
+name: Analisi SonarCloud .NET
+
+# Trigger: quando eseguire questa azione
+on:
+  # Esegui su ogni push verso il branch principale (che potrebbe essere 'main' o 'master')
+  push:
+    branches:
+      - master
+      - main
+  # Esegui anche quando viene aperta o aggiornata una Pull Request
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    name: Build e Analisi
+    # Usa l'ultima versione di Windows per la massima compatibilità con .NET
+    runs-on: windows-latest
+    
+    steps:
+      # 1. Scarica il codice dal repository
+      - name: Checkout del codice
+        uses: actions/checkout@v3
+        with:
+          # SonarCloud ha bisogno della cronologia completa per funzionare al meglio
+          fetch-depth: 0
+
+      # 2. Installa Java (richiesto dallo scanner di Sonar)
+      - name: Setup Java JDK
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'zulu'
+
+      # 3. Mette in cache i pacchetti di SonarCloud per velocizzare le esecuzioni future
+      - name: Cache pacchetti SonarCloud
+        uses: actions/cache@v3
+        with:
+          path: ~\.sonar\cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      # 4. Mette in cache lo scanner di SonarCloud
+      - name: Cache scanner SonarCloud
+        id: cache-sonar-scanner
+        uses: actions/cache@v3
+        with:
+          path: .\.sonar\scanner
+          key: ${{ runner.os }}-sonar-scanner
+          restore-keys: ${{ runner.os }}-sonar-scanner
+
+      # 5. Installa lo scanner solo se non è presente nella cache
+      - name: Install scanner SonarCloud
+        if: steps.cache-sonar-scanner.outputs.cache-hit != 'true'
+        shell: powershell
+        run: |
+          New-Item -Path .\.sonar\scanner -ItemType Directory
+          dotnet tool update dotnet-sonarscanner --tool-path .\.sonar\scanner
+
+      # 6. Esegue la build e l'analisi del progetto
+      - name: Build e Analisi
+        env:
+          # Token di GitHub per l'integrazione con le Pull Request
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Il tuo token segreto di SonarCloud che hai salvato prima
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        shell: powershell
+        run: |
+          .\.sonar\scanner\dotnet-sonarscanner begin /k:"AssifPGit_Centralino_AutozzattiXFP" /o:"AssifPGit" /d:sonar.login="${{ env.SONAR_TOKEN }}" /d:sonar.host.url="https://sonarcloud.io"
+          dotnet build --no-incremental
+          .\.sonar\scanner\dotnet-sonarscanner end /d:sonar.login="${{ env.SONAR_TOKEN }}"
